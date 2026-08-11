@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"io"
 	"log/slog"
 	"net/http"
@@ -9,6 +10,14 @@ import (
 
 	"forge/internal/http/middleware"
 )
+
+type mockPinger struct {
+	err error
+}
+
+func (m mockPinger) Ping(context.Context) error {
+	return m.err
+}
 
 func TestHealthHandler(t *testing.T) {
 	logger := testLogger()
@@ -28,6 +37,56 @@ func TestHealthHandler(t *testing.T) {
 
 	if response.Body.String() != expected {
 		t.Fatalf("expected body %q, got %q", expected, response.Body.String())
+	}
+}
+
+func TestReadyHandler(t *testing.T) {
+	handler := readyHandler(mockPinger{})
+
+	request := httptest.NewRequest(http.MethodGet, "/ready", nil)
+	response := httptest.NewRecorder()
+
+	handler(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, response.Code)
+	}
+
+	expected := `{"status":"ok"}` + "\n"
+
+	if response.Body.String() != expected {
+		t.Fatalf("expected body %q, got %q", expected, response.Body.String())
+	}
+}
+
+func TestReadyHandlerDatabaseUnavailable(t *testing.T) {
+	expectedError := context.DeadlineExceeded
+
+	handler := readyHandler(mockPinger{
+		err: expectedError,
+	})
+
+	request := httptest.NewRequest(http.MethodGet, "/ready", nil)
+	response := httptest.NewRecorder()
+
+	handler(response, request)
+
+	if response.Code != http.StatusServiceUnavailable {
+		t.Fatalf(
+			"expected status %d, got %d",
+			http.StatusServiceUnavailable,
+			response.Code,
+		)
+	}
+
+	expected := `{"error":"database unavailable"}` + "\n"
+
+	if response.Body.String() != expected {
+		t.Fatalf(
+			"expected body %q, got %q",
+			expected,
+			response.Body.String(),
+		)
 	}
 }
 

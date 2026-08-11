@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"forge/internal/config"
+	"forge/internal/database"
 	"forge/internal/http/middleware"
 	"forge/internal/http/response"
 	"forge/internal/logger"
@@ -59,6 +60,34 @@ func healthHandler(log *slog.Logger) http.HandlerFunc {
 	}
 }
 
+func readyHandler(db database.Pinger) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+		defer cancel()
+
+		if err := db.Ping(ctx); err != nil {
+			response.JSONError(
+				w,
+				http.StatusServiceUnavailable,
+				"database unavailable",
+			)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+
+		if err := json.NewEncoder(w).Encode(HealthResponse{
+			Status: "ok",
+		}); err != nil {
+			response.JSONError(
+				w,
+				http.StatusInternalServerError,
+				"internal server error",
+			)
+		}
+	}
+}
+
 func versionHandler(w http.ResponseWriter, r *http.Request) {
 	responseBody := VersionResponse{
 		Version: version.Value,
@@ -87,9 +116,27 @@ func main() {
 	cfg := config.Load()
 	log := logger.New()
 
+	dbContext, dbCancel := context.WithTimeout(
+		context.Background(),
+		10*time.Second,
+	)
+	defer dbCancel()
+
+	db, err := database.Connect(dbContext, cfg.DatabaseURL)
+	if err != nil {
+		log.Error("failed to connect to database",
+			"error", err,
+		)
+		os.Exit(1)
+	}
+	defer db.Close()
+
+	log.Info("database connection established")
+
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/health", healthHandler(log))
+	mux.HandleFunc("/ready", readyHandler(db))
 	mux.HandleFunc("/version", versionHandler)
 	mux.HandleFunc("/", notFoundHandler)
 
@@ -118,7 +165,10 @@ func main() {
 
 		log.Info("shutdown signal received")
 
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		ctx, cancel := context.WithTimeout(
+			context.Background(),
+			10*time.Second,
+		)
 		defer cancel()
 
 		log.Info("starting graceful shutdown")
@@ -133,7 +183,8 @@ func main() {
 		log.Info("graceful shutdown completed")
 	}()
 
-	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+	if err := server.ListenAndServe(); err != nil &&
+		!errors.Is(err, http.ErrServerClosed) {
 		log.Error("server stopped unexpectedly",
 			"error", err,
 		)
