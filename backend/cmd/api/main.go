@@ -16,6 +16,7 @@ import (
 	"forge/internal/http/middleware"
 	"forge/internal/http/response"
 	"forge/internal/logger"
+	"forge/internal/users"
 	"forge/internal/version"
 )
 
@@ -133,11 +134,16 @@ func main() {
 
 	log.Info("database connection established")
 
+	userRepository := database.NewUserRepository(db)
+	userService := users.NewService(userRepository)
+	userHandler := users.NewHandler(userService)
+
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/health", healthHandler(log))
 	mux.HandleFunc("/ready", readyHandler(db))
 	mux.HandleFunc("/version", versionHandler)
+	mux.HandleFunc("/users", userHandler.Register)
 	mux.HandleFunc("/", notFoundHandler)
 
 	handler := middleware.SecurityHeaders(mux)

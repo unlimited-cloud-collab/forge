@@ -273,7 +273,7 @@ func applyMigration(
 	}
 
 	defer func() {
-		_ = tx.Rollback(ctx)
+		_ = tx.Rollback(context.Background())
 	}()
 
 	if _, err := tx.Exec(ctx, m.sql); err != nil {
