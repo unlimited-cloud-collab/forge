@@ -2,38 +2,47 @@ package config
 
 import "testing"
 
-func TestLoadUsesDefaultValues(t *testing.T) {
+func TestLoadUsesDefaults(t *testing.T) {
 	t.Setenv("PORT", "")
 	t.Setenv("DATABASE_URL", "")
 
 	cfg := Load()
 
-	if cfg.Port != "8080" {
-		t.Fatalf("expected default port %q, got %q", "8080", cfg.Port)
+	if cfg.Port != defaultPort {
+		t.Fatalf(
+			"expected default port %q, got %q",
+			defaultPort,
+			cfg.Port,
+		)
 	}
 
-	expectedDatabaseURL := "postgres://forge:forge_dev_password@localhost:5432/forge"
-
-	if cfg.DatabaseURL != expectedDatabaseURL {
+	if cfg.DatabaseURL != defaultDatabaseURL {
 		t.Fatalf(
 			"expected default database URL %q, got %q",
-			expectedDatabaseURL,
+			defaultDatabaseURL,
 			cfg.DatabaseURL,
 		)
 	}
 }
 
 func TestLoadUsesEnvironmentValues(t *testing.T) {
-	t.Setenv("PORT", "9090")
-	t.Setenv("DATABASE_URL", "postgres://test:test@localhost:5432/testdb")
+	const (
+		expectedPort        = "9090"
+		expectedDatabaseURL = "postgres://test:test@localhost:5432/testdb"
+	)
+
+	t.Setenv("PORT", expectedPort)
+	t.Setenv("DATABASE_URL", expectedDatabaseURL)
 
 	cfg := Load()
 
-	if cfg.Port != "9090" {
-		t.Fatalf("expected port %q, got %q", "9090", cfg.Port)
+	if cfg.Port != expectedPort {
+		t.Fatalf(
+			"expected port %q, got %q",
+			expectedPort,
+			cfg.Port,
+		)
 	}
-
-	expectedDatabaseURL := "postgres://test:test@localhost:5432/testdb"
 
 	if cfg.DatabaseURL != expectedDatabaseURL {
 		t.Fatalf(
@@ -41,5 +50,20 @@ func TestLoadUsesEnvironmentValues(t *testing.T) {
 			expectedDatabaseURL,
 			cfg.DatabaseURL,
 		)
+	}
+}
+
+func TestLoadDoesNotRequireEnvironmentVariables(t *testing.T) {
+	t.Setenv("PORT", "")
+	t.Setenv("DATABASE_URL", "")
+
+	cfg := Load()
+
+	if cfg.Port == "" {
+		t.Fatal("expected port to have a value")
+	}
+
+	if cfg.DatabaseURL == "" {
+		t.Fatal("expected database URL to have a value")
 	}
 }

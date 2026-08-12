@@ -140,7 +140,9 @@ func main() {
 	mux.HandleFunc("/version", versionHandler)
 	mux.HandleFunc("/", notFoundHandler)
 
-	handler := middleware.RequestID(mux)
+	handler := middleware.SecurityHeaders(mux)
+	handler = middleware.BodyLimit(handler)
+	handler = middleware.RequestID(handler)
 	handler = middleware.RequestLogger(log)(handler)
 
 	server := &http.Server{
@@ -158,36 +160,54 @@ func main() {
 	)
 
 	shutdownSignals := make(chan os.Signal, 1)
-	signal.Notify(shutdownSignals, os.Interrupt, syscall.SIGTERM)
+
+	signal.Notify(
+		shutdownSignals,
+		os.Interrupt,
+		syscall.SIGTERM,
+	)
+	defer signal.Stop(shutdownSignals)
+
+	serverErr := make(chan error, 1)
 
 	go func() {
-		<-shutdownSignals
-
-		log.Info("shutdown signal received")
-
-		ctx, cancel := context.WithTimeout(
-			context.Background(),
-			10*time.Second,
-		)
-		defer cancel()
-
-		log.Info("starting graceful shutdown")
-
-		if err := server.Shutdown(ctx); err != nil {
-			log.Error("graceful shutdown failed",
-				"error", err,
-			)
-			return
-		}
-
-		log.Info("graceful shutdown completed")
+		serverErr <- server.ListenAndServe()
 	}()
 
-	if err := server.ListenAndServe(); err != nil &&
-		!errors.Is(err, http.ErrServerClosed) {
-		log.Error("server stopped unexpectedly",
+	select {
+	case err := <-serverErr:
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Error("server stopped unexpectedly",
+				"error", err,
+			)
+			os.Exit(1)
+		}
+
+		return
+
+	case signal := <-shutdownSignals:
+		log.Info("shutdown signal received",
+			"signal", signal.String(),
+		)
+	}
+
+	shutdownContext, shutdownCancel := context.WithTimeout(
+		context.Background(),
+		10*time.Second,
+	)
+	defer shutdownCancel()
+
+	log.Info("starting graceful shutdown")
+
+	if err := server.Shutdown(shutdownContext); err != nil {
+		log.Error("graceful shutdown failed",
 			"error", err,
 		)
-		os.Exit(1)
+
+		return
 	}
+
+	log.Info("graceful shutdown completed")
+
+	log.Info("Forge API stopped")
 }

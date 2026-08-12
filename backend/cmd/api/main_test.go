@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
@@ -199,7 +201,11 @@ func TestRequestIDMiddlewarePreservesExistingRequestID(t *testing.T) {
 }
 
 func TestRequestLogger(t *testing.T) {
-	logger := testLogger()
+	var logs bytes.Buffer
+
+	logger := slog.New(
+		slog.NewJSONHandler(&logs, nil),
+	)
 
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusCreated)
@@ -209,7 +215,12 @@ func TestRequestLogger(t *testing.T) {
 		middleware.RequestLogger(logger)(next),
 	)
 
-	request := httptest.NewRequest(http.MethodPost, "/test", nil)
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/test",
+		nil,
+	)
+
 	response := httptest.NewRecorder()
 
 	handler.ServeHTTP(response, request)
@@ -222,8 +233,76 @@ func TestRequestLogger(t *testing.T) {
 		)
 	}
 
-	if response.Header().Get("X-Request-ID") == "" {
+	requestID := response.Header().Get("X-Request-ID")
+
+	if requestID == "" {
 		t.Fatal("expected X-Request-ID response header")
+	}
+
+	var logEntry map[string]any
+
+	if err := json.Unmarshal(logs.Bytes(), &logEntry); err != nil {
+		t.Fatalf(
+			"expected valid JSON log entry, got %q: %v",
+			logs.String(),
+			err,
+		)
+	}
+
+	if logEntry["msg"] != "http request" {
+		t.Fatalf(
+			"expected log message %q, got %q",
+			"http request",
+			logEntry["msg"],
+		)
+	}
+
+	if logEntry["method"] != http.MethodPost {
+		t.Fatalf(
+			"expected method %q, got %q",
+			http.MethodPost,
+			logEntry["method"],
+		)
+	}
+
+	if logEntry["path"] != "/test" {
+		t.Fatalf(
+			"expected path %q, got %q",
+			"/test",
+			logEntry["path"],
+		)
+	}
+
+	if logEntry["status"] != float64(http.StatusCreated) {
+		t.Fatalf(
+			"expected status %d, got %v",
+			http.StatusCreated,
+			logEntry["status"],
+		)
+	}
+
+	duration, ok := logEntry["duration_ms"].(float64)
+
+	if !ok {
+		t.Fatalf(
+			"expected duration_ms to be numeric, got %T",
+			logEntry["duration_ms"],
+		)
+	}
+
+	if duration < 0 {
+		t.Fatalf(
+			"expected duration_ms to be non-negative, got %v",
+			duration,
+		)
+	}
+
+	if logEntry["request_id"] != requestID {
+		t.Fatalf(
+			"expected request_id %q, got %q",
+			requestID,
+			logEntry["request_id"],
+		)
 	}
 }
 
