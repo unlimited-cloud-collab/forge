@@ -2,6 +2,7 @@ package database
 
 import (
 	"context"
+	"errors"
 	"os"
 	"testing"
 	"time"
@@ -123,6 +124,53 @@ func TestUserRepositoryGetByEmailNotFound(t *testing.T) {
 	if err != ErrUserNotFound {
 		t.Fatalf(
 			"expected ErrUserNotFound, got %v",
+			err,
+		)
+	}
+}
+
+func TestUserRepositoryCreateRejectsDuplicateEmail(t *testing.T) {
+	pool := testDatabasePool(t)
+	repository := NewUserRepository(pool)
+
+	ctx, cancel := context.WithTimeout(
+		context.Background(),
+		5*time.Second,
+	)
+	defer cancel()
+
+	user := User{
+		ID:           uuid.New(),
+		Email:        "duplicate-" + uuid.NewString() + "@example.com",
+		PasswordHash: "test-password-hash",
+	}
+
+	if err := repository.Create(ctx, user); err != nil {
+		t.Fatalf("create first user: %v", err)
+	}
+
+	t.Cleanup(func() {
+		_, _ = pool.Exec(
+			context.Background(),
+			`DELETE FROM users WHERE id = $1`,
+			user.ID,
+		)
+	})
+
+	duplicate := User{
+		ID:           uuid.New(),
+		Email:        user.Email,
+		PasswordHash: "different-test-password-hash",
+	}
+
+	err := repository.Create(ctx, duplicate)
+	if err == nil {
+		t.Fatal("expected duplicate email error")
+	}
+
+	if !errors.Is(err, ErrUserEmailTaken) {
+		t.Fatalf(
+			"expected ErrUserEmailTaken, got %v",
 			err,
 		)
 	}

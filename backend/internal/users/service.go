@@ -13,9 +13,10 @@ import (
 )
 
 var (
-	ErrInvalidEmail    = errors.New("invalid email")
-	ErrInvalidPassword = errors.New("invalid password")
-	ErrEmailTaken      = errors.New("email already registered")
+	ErrInvalidEmail       = errors.New("invalid email")
+	ErrInvalidPassword    = errors.New("invalid password")
+	ErrEmailTaken         = errors.New("email already registered")
+	ErrInvalidCredentials = errors.New("invalid credentials")
 )
 
 type UserRepository interface {
@@ -72,7 +73,45 @@ func (s *Service) Register(
 	}
 
 	if err := s.repository.Create(ctx, user); err != nil {
+		if errors.Is(err, database.ErrUserEmailTaken) {
+			return database.User{}, ErrEmailTaken
+		}
+
 		return database.User{}, fmt.Errorf("create user: %w", err)
+	}
+
+	return user, nil
+}
+
+func (s *Service) Authenticate(
+	ctx context.Context,
+	email string,
+	password string,
+) (database.User, error) {
+	email = strings.TrimSpace(email)
+
+	if email == "" {
+		return database.User{}, ErrInvalidCredentials
+	}
+
+	if password == "" {
+		return database.User{}, ErrInvalidCredentials
+	}
+
+	user, err := s.repository.GetByEmail(ctx, email)
+	if err != nil {
+		if errors.Is(err, database.ErrUserNotFound) {
+			return database.User{}, ErrInvalidCredentials
+		}
+
+		return database.User{}, fmt.Errorf("get user by email: %w", err)
+	}
+
+	if err := bcrypt.CompareHashAndPassword(
+		[]byte(user.PasswordHash),
+		[]byte(password),
+	); err != nil {
+		return database.User{}, ErrInvalidCredentials
 	}
 
 	return user, nil

@@ -177,3 +177,114 @@ func bcryptCompare(hash string, password string) error {
 		[]byte(password),
 	)
 }
+
+func TestRegisterTranslatesDuplicateEmailFromRepository(
+	t *testing.T,
+) {
+	repository := &duplicateEmailRepository{}
+	service := NewService(repository)
+
+	_, err := service.Register(
+		context.Background(),
+		"user@example.com",
+		"password",
+	)
+
+	if !errors.Is(err, ErrEmailTaken) {
+		t.Fatalf(
+			"expected ErrEmailTaken, got %v",
+			err,
+		)
+	}
+}
+
+type duplicateEmailRepository struct{}
+
+func (r *duplicateEmailRepository) Create(
+	context.Context,
+	database.User,
+) error {
+	return database.ErrUserEmailTaken
+}
+
+func (r *duplicateEmailRepository) GetByEmail(
+	context.Context,
+	string,
+) (database.User, error) {
+	return database.User{}, database.ErrUserNotFound
+}
+
+func TestAuthenticateWithValidCredentials(t *testing.T) {
+	repository := newFakeUserRepository()
+	service := NewService(repository)
+
+	_, err := service.Register(
+		context.Background(),
+		"user@example.com",
+		"correct horse battery staple",
+	)
+	if err != nil {
+		t.Fatalf("register user: %v", err)
+	}
+
+	user, err := service.Authenticate(
+		context.Background(),
+		"user@example.com",
+		"correct horse battery staple",
+	)
+	if err != nil {
+		t.Fatalf("authenticate user: %v", err)
+	}
+
+	if user.Email != "user@example.com" {
+		t.Fatalf(
+			"expected email %q, got %q",
+			"user@example.com",
+			user.Email,
+		)
+	}
+}
+
+func TestAuthenticateRejectsWrongPassword(t *testing.T) {
+	repository := newFakeUserRepository()
+	service := NewService(repository)
+
+	_, err := service.Register(
+		context.Background(),
+		"user@example.com",
+		"correct password",
+	)
+	if err != nil {
+		t.Fatalf("register user: %v", err)
+	}
+
+	_, err = service.Authenticate(
+		context.Background(),
+		"user@example.com",
+		"wrong password",
+	)
+
+	if !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf(
+			"expected ErrInvalidCredentials, got %v",
+			err,
+		)
+	}
+}
+
+func TestAuthenticateRejectsUnknownUser(t *testing.T) {
+	service := NewService(newFakeUserRepository())
+
+	_, err := service.Authenticate(
+		context.Background(),
+		"missing@example.com",
+		"some password",
+	)
+
+	if !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf(
+			"expected ErrInvalidCredentials, got %v",
+			err,
+		)
+	}
+}

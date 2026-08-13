@@ -144,6 +144,7 @@ func main() {
 	mux.HandleFunc("/ready", readyHandler(db))
 	mux.HandleFunc("/version", versionHandler)
 	mux.HandleFunc("/users", userHandler.Register)
+	mux.HandleFunc("/login", userHandler.Login)
 	mux.HandleFunc("/", notFoundHandler)
 
 	handler := middleware.SecurityHeaders(mux)

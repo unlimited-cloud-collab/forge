@@ -218,3 +218,94 @@ func TestRegisterHandlerRejectsWrongMethod(t *testing.T) {
 		)
 	}
 }
+
+func TestLoginHandlerAuthenticatesUser(t *testing.T) {
+	repository := newHandlerUserRepository()
+	service := NewService(repository)
+	handler := NewHandler(service)
+
+	_, err := service.Register(
+		context.Background(),
+		"alice@example.com",
+		"correct password",
+	)
+	if err != nil {
+		t.Fatalf("register user: %v", err)
+	}
+
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/login",
+		bytes.NewBufferString(
+			`{"email":"alice@example.com","password":"correct password"}`,
+		),
+	)
+
+	recorder := httptest.NewRecorder()
+
+	handler.Login(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf(
+			"expected status %d, got %d",
+			http.StatusOK,
+			recorder.Code,
+		)
+	}
+
+	var response userResponse
+
+	if err := json.NewDecoder(recorder.Body).Decode(&response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	if response.Email != "alice@example.com" {
+		t.Fatalf(
+			"expected email %q, got %q",
+			"alice@example.com",
+			response.Email,
+		)
+	}
+
+	if bytes.Contains(
+		recorder.Body.Bytes(),
+		[]byte("password"),
+	) {
+		t.Fatal("response must not contain password data")
+	}
+}
+
+func TestLoginHandlerRejectsInvalidCredentials(t *testing.T) {
+	repository := newHandlerUserRepository()
+	service := NewService(repository)
+	handler := NewHandler(service)
+
+	_, err := service.Register(
+		context.Background(),
+		"alice@example.com",
+		"correct password",
+	)
+	if err != nil {
+		t.Fatalf("register user: %v", err)
+	}
+
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/login",
+		bytes.NewBufferString(
+			`{"email":"alice@example.com","password":"wrong password"}`,
+		),
+	)
+
+	recorder := httptest.NewRecorder()
+
+	handler.Login(recorder, request)
+
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf(
+			"expected status %d, got %d",
+			http.StatusUnauthorized,
+			recorder.Code,
+		)
+	}
+}
