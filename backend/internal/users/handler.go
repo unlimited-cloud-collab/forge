@@ -1,16 +1,31 @@
 package users
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
+	"time"
 
 	"github.com/google/uuid"
+
+	"forge/internal/sessions"
 )
 
+const SessionCookieName = "forge_session"
+
+type SessionCreator interface {
+	Create(
+		context.Context,
+		uuid.UUID,
+	) (sessions.CreatedSession, error)
+}
+
 type Handler struct {
-	service *Service
+	service             *Service
+	sessionCreator      SessionCreator
+	sessionCookieSecure bool
 }
 
 type loginRequest struct {
@@ -18,9 +33,15 @@ type loginRequest struct {
 	Password string `json:"password"`
 }
 
-func NewHandler(service *Service) *Handler {
+func NewHandler(
+	service *Service,
+	sessionCreator SessionCreator,
+	sessionCookieSecure bool,
+) *Handler {
 	return &Handler{
-		service: service,
+		service:             service,
+		sessionCreator:      sessionCreator,
+		sessionCookieSecure: sessionCookieSecure,
 	}
 }
 
@@ -191,6 +212,44 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 
 		return
 	}
+
+	if h.sessionCreator == nil {
+		writeJSONError(
+			w,
+			http.StatusInternalServerError,
+			"internal server error",
+		)
+		return
+	}
+
+	session, err := h.sessionCreator.Create(
+		r.Context(),
+		user.ID,
+	)
+	if err != nil {
+		writeJSONError(
+			w,
+			http.StatusInternalServerError,
+			"internal server error",
+		)
+		return
+	}
+
+	http.SetCookie(
+		w,
+		&http.Cookie{
+			Name:     SessionCookieName,
+			Value:    session.Token,
+			Path:     "/",
+			HttpOnly: true,
+			Secure:   h.sessionCookieSecure,
+			SameSite: http.SameSiteStrictMode,
+			Expires:  session.ExpiresAt,
+			MaxAge:   int(sessions.SessionLifetime / time.Second),
+		},
+	)
+
+	w.Header().Set("Cache-Control", "no-store")
 
 	writeJSON(
 		w,

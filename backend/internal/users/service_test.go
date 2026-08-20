@@ -142,7 +142,12 @@ func TestRegisterRejectsEmptyPassword(t *testing.T) {
 }
 
 func TestRegisterPropagatesRepositoryFailure(t *testing.T) {
-	repository := &failingUserRepository{}
+	repositoryError := errors.New("database unavailable")
+
+	repository := &failingUserRepository{
+		err: repositoryError,
+	}
+
 	service := NewService(repository)
 
 	_, err := service.Register(
@@ -153,22 +158,31 @@ func TestRegisterPropagatesRepositoryFailure(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected repository error")
 	}
+
+	if !errors.Is(err, repositoryError) {
+		t.Fatalf(
+			"expected repository error to be preserved, got %v",
+			err,
+		)
+	}
 }
 
-type failingUserRepository struct{}
+type failingUserRepository struct {
+	err error
+}
 
 func (r *failingUserRepository) Create(
 	context.Context,
 	database.User,
 ) error {
-	return errors.New("database unavailable")
+	return r.err
 }
 
 func (r *failingUserRepository) GetByEmail(
 	context.Context,
 	string,
 ) (database.User, error) {
-	return database.User{}, database.ErrUserNotFound
+	return database.User{}, r.err
 }
 
 func bcryptCompare(hash string, password string) error {
@@ -286,5 +300,35 @@ func TestAuthenticateRejectsUnknownUser(t *testing.T) {
 			"expected ErrInvalidCredentials, got %v",
 			err,
 		)
+	}
+}
+
+func TestAuthenticatePropagatesRepositoryFailure(t *testing.T) {
+	repositoryError := errors.New("database unavailable")
+
+	repository := &failingUserRepository{
+		err: repositoryError,
+	}
+
+	service := NewService(repository)
+
+	_, err := service.Authenticate(
+		context.Background(),
+		"user@example.com",
+		"password",
+	)
+	if err == nil {
+		t.Fatal("expected repository error")
+	}
+
+	if !errors.Is(err, repositoryError) {
+		t.Fatalf(
+			"expected repository error to be preserved, got %v",
+			err,
+		)
+	}
+
+	if errors.Is(err, ErrInvalidCredentials) {
+		t.Fatal("repository failure must not become invalid credentials")
 	}
 }

@@ -16,8 +16,10 @@ import (
 	"forge/internal/http/middleware"
 	"forge/internal/http/response"
 	"forge/internal/logger"
+	"forge/internal/sessions"
 	"forge/internal/users"
 	"forge/internal/version"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type HealthResponse struct {
@@ -113,6 +115,40 @@ func notFoundHandler(w http.ResponseWriter, r *http.Request) {
 	)
 }
 
+func newHTTPHandler(
+	log *slog.Logger,
+	db *pgxpool.Pool,
+	sessionCookieSecure bool,
+) http.Handler {
+	userRepository := database.NewUserRepository(db)
+	userService := users.NewService(userRepository)
+
+	sessionRepository := database.NewSessionRepository(db)
+	sessionService := sessions.NewService(sessionRepository)
+
+	userHandler := users.NewHandler(
+		userService,
+		sessionService,
+		sessionCookieSecure,
+	)
+
+	mux := http.NewServeMux()
+
+	mux.HandleFunc("/health", healthHandler(log))
+	mux.HandleFunc("/ready", readyHandler(db))
+	mux.HandleFunc("/version", versionHandler)
+	mux.HandleFunc("/users", userHandler.Register)
+	mux.HandleFunc("/login", userHandler.Login)
+	mux.HandleFunc("/", notFoundHandler)
+
+	handler := middleware.SecurityHeaders(mux)
+	handler = middleware.BodyLimit(handler)
+	handler = middleware.RequestID(handler)
+	handler = middleware.RequestLogger(log)(handler)
+
+	return handler
+}
+
 func main() {
 	cfg := config.Load()
 	log := logger.New()
@@ -134,23 +170,11 @@ func main() {
 
 	log.Info("database connection established")
 
-	userRepository := database.NewUserRepository(db)
-	userService := users.NewService(userRepository)
-	userHandler := users.NewHandler(userService)
-
-	mux := http.NewServeMux()
-
-	mux.HandleFunc("/health", healthHandler(log))
-	mux.HandleFunc("/ready", readyHandler(db))
-	mux.HandleFunc("/version", versionHandler)
-	mux.HandleFunc("/users", userHandler.Register)
-	mux.HandleFunc("/login", userHandler.Login)
-	mux.HandleFunc("/", notFoundHandler)
-
-	handler := middleware.SecurityHeaders(mux)
-	handler = middleware.BodyLimit(handler)
-	handler = middleware.RequestID(handler)
-	handler = middleware.RequestLogger(log)(handler)
+	handler := newHTTPHandler(
+		log,
+		db,
+		cfg.SessionCookieSecure,
+	)
 
 	server := &http.Server{
 		Addr:              ":" + cfg.Port,

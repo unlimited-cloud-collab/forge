@@ -12,12 +12,19 @@ import (
 	"forge/internal/database"
 )
 
+const dummyPasswordHash = "$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy"
+
 var (
 	ErrInvalidEmail       = errors.New("invalid email")
 	ErrInvalidPassword    = errors.New("invalid password")
 	ErrEmailTaken         = errors.New("email already registered")
 	ErrInvalidCredentials = errors.New("invalid credentials")
 )
+
+type AuthenticatedUser struct {
+	ID    uuid.UUID
+	Email string
+}
 
 type UserRepository interface {
 	Create(context.Context, database.User) error
@@ -87,32 +94,42 @@ func (s *Service) Authenticate(
 	ctx context.Context,
 	email string,
 	password string,
-) (database.User, error) {
+) (AuthenticatedUser, error) {
 	email = strings.TrimSpace(email)
 
-	if email == "" {
-		return database.User{}, ErrInvalidCredentials
-	}
-
-	if password == "" {
-		return database.User{}, ErrInvalidCredentials
+	if email == "" || password == "" {
+		return AuthenticatedUser{}, ErrInvalidCredentials
 	}
 
 	user, err := s.repository.GetByEmail(ctx, email)
 	if err != nil {
 		if errors.Is(err, database.ErrUserNotFound) {
-			return database.User{}, ErrInvalidCredentials
+			// Perform the same expensive password operation used for
+			// existing users so the missing-user path does not return
+			// immediately based on account existence.
+			_ = bcrypt.CompareHashAndPassword(
+				[]byte(dummyPasswordHash),
+				[]byte(password),
+			)
+
+			return AuthenticatedUser{}, ErrInvalidCredentials
 		}
 
-		return database.User{}, fmt.Errorf("get user by email: %w", err)
+		return AuthenticatedUser{}, fmt.Errorf(
+			"get user by email: %w",
+			err,
+		)
 	}
 
 	if err := bcrypt.CompareHashAndPassword(
 		[]byte(user.PasswordHash),
 		[]byte(password),
 	); err != nil {
-		return database.User{}, ErrInvalidCredentials
+		return AuthenticatedUser{}, ErrInvalidCredentials
 	}
 
-	return user, nil
+	return AuthenticatedUser{
+		ID:    user.ID,
+		Email: user.Email,
+	}, nil
 }

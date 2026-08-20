@@ -67,3 +67,23 @@ func TestLoadDoesNotRequireEnvironmentVariables(t *testing.T) {
 		t.Fatal("expected database URL to have a value")
 	}
 }
+
+func TestLoadUsesSessionCookieSecureEnvironmentValue(t *testing.T) {
+	t.Setenv("SESSION_COOKIE_SECURE", "true")
+
+	cfg := Load()
+
+	if !cfg.SessionCookieSecure {
+		t.Fatal("expected session cookie secure to be enabled")
+	}
+}
+
+func TestLoadDisablesSessionCookieSecureByDefault(t *testing.T) {
+	t.Setenv("SESSION_COOKIE_SECURE", "")
+
+	cfg := Load()
+
+	if cfg.SessionCookieSecure {
+		t.Fatal("expected session cookie secure to be disabled by default")
+	}
+}

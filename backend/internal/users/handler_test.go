@@ -12,6 +12,9 @@ import (
 	"github.com/google/uuid"
 
 	"forge/internal/database"
+	"time"
+
+	"forge/internal/sessions"
 )
 
 type handlerUserRepository struct {
@@ -51,7 +54,7 @@ func (r *handlerUserRepository) GetByEmail(
 
 func TestRegisterHandlerCreatesUser(t *testing.T) {
 	service := NewService(newHandlerUserRepository())
-	handler := NewHandler(service)
+	handler := NewHandler(service, nil, false)
 
 	body := bytes.NewBufferString(
 		`{"email":"alice@example.com","password":"correct horse battery staple"}`,
@@ -104,7 +107,7 @@ func TestRegisterHandlerCreatesUser(t *testing.T) {
 
 func TestRegisterHandlerRejectsMalformedJSON(t *testing.T) {
 	service := NewService(newHandlerUserRepository())
-	handler := NewHandler(service)
+	handler := NewHandler(service, nil, false)
 
 	request := httptest.NewRequest(
 		http.MethodPost,
@@ -127,7 +130,7 @@ func TestRegisterHandlerRejectsMalformedJSON(t *testing.T) {
 
 func TestRegisterHandlerRejectsUnknownFields(t *testing.T) {
 	service := NewService(newHandlerUserRepository())
-	handler := NewHandler(service)
+	handler := NewHandler(service, nil, false)
 
 	request := httptest.NewRequest(
 		http.MethodPost,
@@ -153,7 +156,7 @@ func TestRegisterHandlerRejectsUnknownFields(t *testing.T) {
 func TestRegisterHandlerRejectsDuplicateEmail(t *testing.T) {
 	repository := newHandlerUserRepository()
 	service := NewService(repository)
-	handler := NewHandler(service)
+	handler := NewHandler(service, nil, false)
 
 	first := httptest.NewRequest(
 		http.MethodPost,
@@ -198,7 +201,7 @@ func TestRegisterHandlerRejectsDuplicateEmail(t *testing.T) {
 
 func TestRegisterHandlerRejectsWrongMethod(t *testing.T) {
 	service := NewService(newHandlerUserRepository())
-	handler := NewHandler(service)
+	handler := NewHandler(service, nil, false)
 
 	request := httptest.NewRequest(
 		http.MethodGet,
@@ -222,7 +225,19 @@ func TestRegisterHandlerRejectsWrongMethod(t *testing.T) {
 func TestLoginHandlerAuthenticatesUser(t *testing.T) {
 	repository := newHandlerUserRepository()
 	service := NewService(repository)
-	handler := NewHandler(service)
+	sessionCreator := &fakeSessionCreator{
+	session: sessions.CreatedSession{
+		ID:        uuid.New(),
+		Token:     "test-session-token",
+		ExpiresAt: time.Now().UTC().Add(time.Hour),
+		},
+	}
+
+	handler := NewHandler(
+		service,
+		sessionCreator,
+		false,
+	)
 
 	_, err := service.Register(
 		context.Background(),
@@ -278,7 +293,7 @@ func TestLoginHandlerAuthenticatesUser(t *testing.T) {
 func TestLoginHandlerRejectsInvalidCredentials(t *testing.T) {
 	repository := newHandlerUserRepository()
 	service := NewService(repository)
-	handler := NewHandler(service)
+	handler := NewHandler(service, nil, false)
 
 	_, err := service.Register(
 		context.Background(),
@@ -308,4 +323,65 @@ func TestLoginHandlerRejectsInvalidCredentials(t *testing.T) {
 			recorder.Code,
 		)
 	}
+}
+
+func TestLoginHandlerDoesNotRevealUnknownUser(t *testing.T) {
+	repository := newHandlerUserRepository()
+	service := NewService(repository)
+	handler := NewHandler(service, nil, false)
+
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/login",
+		bytes.NewBufferString(
+			`{"email":"missing@example.com","password":"wrong password"}`,
+		),
+	)
+
+	recorder := httptest.NewRecorder()
+
+	handler.Login(recorder, request)
+
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf(
+			"expected status %d, got %d",
+			http.StatusUnauthorized,
+			recorder.Code,
+		)
+	}
+
+	var response errorResponse
+
+	if err := json.NewDecoder(recorder.Body).Decode(&response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	if response.Error != "invalid credentials" {
+		t.Fatalf(
+			"expected error %q, got %q",
+			"invalid credentials",
+			response.Error,
+		)
+	}
+}
+
+type fakeSessionCreator struct {
+	session sessions.CreatedSession
+	err     error
+	calls   int
+}
+
+func (f *fakeSessionCreator) Create(
+	_ context.Context,
+	userID uuid.UUID,
+) (sessions.CreatedSession, error) {
+	f.calls++
+
+	if f.err != nil {
+		return sessions.CreatedSession{}, f.err
+	}
+
+	f.session.UserID = userID
+
+	return f.session, nil
 }

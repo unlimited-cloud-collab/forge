@@ -8,8 +8,9 @@ const (
 )
 
 type Config struct {
-	Port        string
-	DatabaseURL string
+	Port               string
+	DatabaseURL        string
+	SessionCookieSecure bool
 }
 
 func Load() Config {
@@ -24,7 +25,8 @@ func Load() Config {
 	}
 
 	return Config{
-		Port:        port,
-		DatabaseURL: databaseURL,
+		Port:                port,
+		DatabaseURL:         databaseURL,
+		SessionCookieSecure: os.Getenv("SESSION_COOKIE_SECURE") == "true",
 	}
 }
